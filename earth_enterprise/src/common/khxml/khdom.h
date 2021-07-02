@@ -1,5 +1,6 @@
 /*
  * Copyright 2017 Google Inc.
+ * Copyright 2020 The Open GEE Contributors 
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +27,15 @@
 #include <list>
 #include <set>
 #include <map>
+#include <memory>
+#include <cstdint>
 
-#include <qstring.h>
-#include <qcolor.h>
+#include <Qt/qstring.h>
+#include <Qt/qcolor.h>
 #include <xercesc/dom/DOM.hpp>
 
-#include "common/khTypes.h"
+//#include "common/khTypes.h"
+#include <cstdint>
 #include "common/khExtents.h"
 #include "common/khTileAddr.h"
 #include "common/khInsetCoverage.h"
@@ -43,6 +47,7 @@
 #include "common/Defaultable.h"
 #include "common/EncryptedQString.h"
 #include "common/geRange.h"
+#include "common/SharedString.h"
 
 
 /******************************************************************************
@@ -101,7 +106,7 @@ void
 ToElement(khxml::DOMElement *elem, const QString &value)
 {
   elem->appendChild(
-      elem->getOwnerDocument()->createTextNode((const XMLCh*)value.ucs2()));
+      elem->getOwnerDocument()->createTextNode((const XMLCh*)value.utf16()));
 }
 
 inline
@@ -110,11 +115,11 @@ ToElement(khxml::DOMElement *elem, const EncryptedQString &value)
 {
   elem->setAttribute(ToXMLStr("method"), ToXMLStr("simple"));
   QString tmp = value;
-  for (uint i = 0; i < tmp.length(); ++i) {
+  for (auto i = 0; i < tmp.length(); ++i) {
     tmp[i] = tmp[i].unicode() + 13;
   }
   elem->appendChild(
-      elem->getOwnerDocument()->createCDATASection((const XMLCh*)tmp.ucs2()));
+      elem->getOwnerDocument()->createCDATASection((const XMLCh*)tmp.utf16()));
 }
 
 template <class T>
@@ -165,6 +170,10 @@ template <class U>
 void
 ToElement(khxml::DOMElement *elem, const std::map<QString, U> &map);
 
+template <class U>
+void
+ToElement(khxml::DOMElement *elem, const std::map<SharedString, U> &map);
+
 template <class T>
 void
 ToElement(khxml::DOMElement *elem, const khSize<T> &size);
@@ -198,7 +207,7 @@ void
 AddAttribute(khxml::DOMElement *elem, const std::string &attrname,
              const QString &value)
 {
-  elem->setAttribute(ToXMLStr(attrname), (const XMLCh*)value.ucs2());
+  elem->setAttribute(ToXMLStr(attrname), (const XMLCh*)value.utf16());
 }
 
 inline
@@ -252,7 +261,7 @@ AddUTF8Element(khxml::DOMElement *parent,
 {
   khxml::DOMElement* elem =
     parent->getOwnerDocument()->createElement
-    ((const XMLCh*)tagname.ucs2());
+    ((const XMLCh*)tagname.utf16());
   ToElement(elem, value);
   parent->appendChild(elem);
   return elem;
@@ -327,10 +336,9 @@ ToElement(khxml::DOMElement *elem, const std::map<T, U> &map)
   }
 }
 
-template <class U>
-void
-ToElement(khxml::DOMElement *elem, const std::map<std::string, U> &map)
-{
+template <class String, class U>
+inline void
+ToElementForStringMap(khxml::DOMElement *elem, const std::map<String, U> &map) {
   for (const auto& iter : map)
   {
     khxml::DOMElement* item =
@@ -343,16 +351,23 @@ ToElement(khxml::DOMElement *elem, const std::map<std::string, U> &map)
 
 template <class U>
 void
+ToElement(khxml::DOMElement *elem, const std::map<std::string, U> &map)
+{
+  ToElementForStringMap(elem, map);
+}
+
+template <class U>
+void
 ToElement(khxml::DOMElement *elem, const std::map<QString, U> &map)
 {
-  for (const auto& iter : map)
-  {
-    khxml::DOMElement* item =
-        elem->getOwnerDocument()->createElement(ToXMLStr("item"));
-    AddAttribute(item, "key", iter.first);
-    ToElement(item, iter.second);
-    elem->appendChild(item);
-  }
+  ToElementForStringMap(elem, map);
+}
+
+template <class U>
+void
+ToElement(khxml::DOMElement *elem, const std::map<SharedString, U> &map)
+{
+  ToElementForStringMap(elem, map);
 }
 
 template <class T>
@@ -543,6 +558,10 @@ template <class U>
 void
 FromElement(khxml::DOMElement *elem, std::map<QString, U> &map);
 
+template <class U>
+void
+FromElement(khxml::DOMElement *elem, std::map<SharedString, U> &map);
+
 template <class T>
 void
 FromElement(khxml::DOMElement *elem, Defaultable<T> &self);
@@ -691,7 +710,7 @@ inline
 void
 FromAttribute(khxml::DOMAttr *attr, QString &val)
 {
-  val = QString::fromUcs2(attr->getValue());
+  val = QString::fromUtf16((const ushort*)attr->getValue());
 }
 
 inline
@@ -712,7 +731,7 @@ GetTextAndCDATA(khxml::DOMElement *elem)
         (node->getNodeType() == khxml::DOMNode::CDATA_SECTION_NODE)) {
       khxml::DOMCharacterData* data = static_cast<khxml::DOMCharacterData*>(node);
       if (data->getLength() > 0) {
-        result.append(QString::fromUcs2(data->getData()));
+        result.append(QString::fromUtf16((const ushort*)data->getData()));
       }
     }
     node = node->getNextSibling();
@@ -783,7 +802,7 @@ FromElement(khxml::DOMElement *elem, QString &val)
     val = "";
     val.squeeze();
   } else {
-    val = QString::fromUcs2((static_cast<khxml::DOMText*>(valNode))->getData());
+    val = QString::fromUtf16((const ushort*)(static_cast<khxml::DOMText*>(valNode))->getData());
   }
 }
 
@@ -807,11 +826,11 @@ FromElement(khxml::DOMElement *elem, EncryptedQString &val)
       khxml::DOMCharacterData* data = static_cast<khxml::DOMCharacterData*>(node);;
       if (data->getLength() > 0) {
         if (method == "plaintext") {
-          val = QString::fromUcs2(data->getData());
+          val = QString::fromUtf16((const ushort*)data->getData());
           return;
         } else if (method == "simple") {
-          QString tmp = QString::fromUcs2(data->getData());
-          for (uint i = 0; i < tmp.length(); ++i) {
+          QString tmp = QString::fromUtf16((const ushort*)data->getData());
+          for (auto i = 0; i < tmp.length(); ++i) {
             tmp[i] = tmp[i].unicode() - 13;
           }
           val = tmp;
@@ -843,6 +862,15 @@ FromElement(khxml::DOMElement *elem, std::string &val)
     khxml::DOMText* valText = static_cast<khxml::DOMText*>(valNode);
     val = FromXMLStr(valText->getData());
   }
+}
+
+inline
+void
+FromElement(khxml::DOMElement *elem, SharedString &val)
+{
+  std::string valStr;
+  FromElement(elem, valStr);
+  val = valStr;
 }
 
 template <class T>
@@ -981,9 +1009,30 @@ FromElement(khxml::DOMElement *elem, std::map<T, U> &map)
   }
 }
 
-template <class U>
+template<class String>
+String FromXMLStrForMap(const XMLCh *xmlch);
+
+template<>
+inline std::string
+FromXMLStrForMap(const XMLCh *xmlch) {
+  return FromXMLStr(xmlch);
+}
+
+template<>
+inline QString
+FromXMLStrForMap(const XMLCh *xmlch) {
+  return QString::fromUtf16((const ushort*)xmlch);
+}
+
+template<>
+inline SharedString
+FromXMLStrForMap(const XMLCh *xmlch) {
+  return FromXMLStr(xmlch);
+}
+
+template <class String, class U>
 void
-FromElement(khxml::DOMElement *elem, std::map<std::string, U> &map)
+FromElementForStringMap(khxml::DOMElement *elem, std::map<String, U> &map)
 {
   map.clear();
   // see if this is the old way or the new way
@@ -996,7 +1045,7 @@ FromElement(khxml::DOMElement *elem, std::map<std::string, U> &map)
 
     for (const auto& iter : kids)
     {
-      std::string key;
+      String key;
       U value;
       GetAttribute(iter, "key", key);
       FromElement(iter, value);
@@ -1008,10 +1057,10 @@ FromElement(khxml::DOMElement *elem, std::map<std::string, U> &map)
     while (node) {
       if (node->getNodeType() == khxml::DOMNode::ELEMENT_NODE) {
         khxml::DOMElement *elem = static_cast<khxml::DOMElement*>(node);
-        std::string name = FromXMLStr(elem->getTagName());
+        String name = FromXMLStrForMap<String>(elem->getTagName());
         U value;
         FromElement(elem, value);
-        map.insert(make_pair(name, value));
+        map.insert(std::make_pair(name, value));
       }
       node = node->getNextSibling();
     }
@@ -1020,40 +1069,22 @@ FromElement(khxml::DOMElement *elem, std::map<std::string, U> &map)
 
 template <class U>
 void
+FromElement(khxml::DOMElement *elem, std::map<std::string, U> &map) {
+  FromElementForStringMap(elem, map);
+}
+
+template <class U>
+void
 FromElement(khxml::DOMElement *elem, std::map<QString, U> &map)
 {
-  map.clear();
+  FromElementForStringMap(elem, map);
+}
 
-  // see if this is the old way or the new way
-  // Old way used keys for tagnames. New way has "item" elements w/
-  // "key" attributes
-  khxml::DOMElement *item = GetFirstNamedChild(elem, "item");
-  if (item && GetNamedAttr(item, "key")) {
-    // new way
-    khDOMElemList kids = GetChildrenByTagName(elem, "item");
-
-    for (const auto& iter : kids)
-    {
-      QString key;
-      U value;
-      GetAttribute(iter, "key", key);
-      FromElement(iter, value);
-      map.insert(std::make_pair(key, value));
-    }
-  } else {
-    // old way
-    khxml::DOMNode *node = elem->getFirstChild();
-    while (node) {
-      if (node->getNodeType() == khxml::DOMNode::ELEMENT_NODE) {
-        khxml::DOMElement *elem = static_cast<khxml::DOMElement*>(node);
-        QString name = QString::fromUcs2(elem->getTagName());
-        U value;
-        FromElement(elem, value);
-        map.insert(std::make_pair(name, value));
-      }
-      node = node->getNextSibling();
-    }
-  }
+template <class U>
+void
+FromElement(khxml::DOMElement *elem, std::map<SharedString, U> &map)
+{
+  FromElementForStringMap(elem, map);
 }
 
 template <class T>
@@ -1090,8 +1121,8 @@ FromElement(khxml::DOMElement *elem, khExtents<T> &extents)
 inline void
 FromElement(khxml::DOMElement *elem, khLevelCoverage &cov)
 {
-  uint level;
-  khExtents<uint32> extents;
+  unsigned int level;
+  khExtents<std::uint32_t> extents;
 
   GetElement(elem, "level", level);
   GetElement(elem, "extents", extents);
@@ -1101,9 +1132,9 @@ FromElement(khxml::DOMElement *elem, khLevelCoverage &cov)
 inline void
 FromElement(khxml::DOMElement *elem, khInsetCoverage &cov)
 {
-  uint beginLevel;
-  uint endLevel;
-  std::vector<khExtents<uint32> > levelExtents;
+  unsigned int beginLevel;
+  unsigned int endLevel;
+  std::vector<khExtents<std::uint32_t> > levelExtents;
 
   GetElement(elem, "beginLevel", beginLevel);
   GetElement(elem, "endLevel", endLevel);
@@ -1111,7 +1142,7 @@ FromElement(khxml::DOMElement *elem, khInsetCoverage &cov)
     throw khException
       (kh::tr("Internal Error: Bad level for khInsetCoverage"));
   }
-  uint numLevels = endLevel - beginLevel;
+  unsigned int numLevels = endLevel - beginLevel;
   levelExtents.reserve(numLevels);
 
   GetElement(elem, "levelExtents", levelExtents);
@@ -1171,56 +1202,23 @@ FromElement(khxml::DOMElement *elem, VerRefGen &val)
 }
 
 /******************************************************************************
- ***  DOM Parser routines that catch Xercves' exceptions
+ ***  DOM Parser routines that catch Xerces' exceptions
  ******************************************************************************/
 
-extern khxml::DOMDocument*
+extern std::unique_ptr<GEDocument>
 CreateEmptyDocument(const std::string &rootTagname) throw();
 
 extern bool
-WriteDocument(khxml::DOMDocument *doc, const std::string &filename) throw();
+WriteDocument(GEDocument *doc, const std::string &filename) throw();
 
 extern bool
-WriteDocumentToString(khxml::DOMDocument *doc, std::string &buf) throw();
+WriteDocumentToString(GEDocument *doc, std::string &buf) throw();
 
-extern khxml::DOMLSParser*
-CreateDOMParser(void) throw();
+extern std::unique_ptr<GEDocument>
+ReadDocument(const std::string &filename) throw();
 
-extern khxml::DOMDocument*
-ReadDocument(khxml::DOMLSParser *parser, const std::string &filename) throw();
-
-extern khxml::DOMDocument*
-ReadDocumentFromString(khxml::DOMLSParser *parser,
-                       const std::string &buf,
+extern std::unique_ptr<GEDocument>
+ReadDocumentFromString(const std::string &buf,
                        const std::string &ref) throw();
-
-extern bool
-DestroyDocument(khxml::DOMDocument *doc) throw();
-
-extern bool
-DestroyParser(khxml::DOMLSParser *parser) throw();
-
-// specialized version of SingleDeleter for document object to be
-// used with khDeleteGuard<>
-template<typename U>
-class DomDeleter {
- public:
-  static void Delete(U* ptr) { DestroyDocument(ptr); }
-};
-
-template <typename T, template<class U> class deleter>
-class khDeleteGuard;
-
-typedef khDeleteGuard<khxml::DOMDocument, DomDeleter> khDomDeleteGuard;
-
-// specialized version of SingleDeleter for parser object to
-// be used with khDeleteGuard<>
-template<typename U>
-class ParserDeleter {
- public:
-  static void Delete(U* ptr) { DestroyParser(ptr); }
-};
-
-typedef khDeleteGuard<khxml::DOMLSParser, ParserDeleter> khParserDeleteGuard;
 
 #endif  // GEO_EARTH_ENTERPRISE_SRC_COMMON_KHXML_KHDOM_H_

@@ -1,4 +1,5 @@
 // Copyright 2017 Google Inc.
+// Copyright 2020 The Open GEE Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,17 +41,17 @@ bool IsRedHat(void) {
   return khExists("/etc/redhat-release");
 }
 
-uint GetNumCPUs(void) {
+unsigned int GetNumCPUs(void) {
   return std::max(uint(1), uint(sysconf(_SC_NPROCESSORS_ONLN)));
 }
 
-uint64 GetPhysicalMemorySize(void) {
-    uint64 pages = sysconf(_SC_PHYS_PAGES),
+ std::uint64_t GetPhysicalMemorySize(void) {
+    std::uint64_t pages = sysconf(_SC_PHYS_PAGES),
            page_size = sysconf(_SC_PAGE_SIZE);
     return (pages * page_size);
 }
 
-uint GetMaxFds(int requested) {
+unsigned int GetMaxFds(int requested) {
   int systemMax = khMaxOpenFiles();
   if (requested > 0) {
     return std::min(systemMax, requested);
@@ -78,7 +79,7 @@ std::string GetAndValidateHostname(void) {
         kh::tr(
             "This machine's hostname (%1) does not map to an IP address.\n",
             "Please use the system utilities to reconfigure the hostname.")
-        .arg(hostname));
+        .arg(hostname.c_str()));
   }
 
   return hostname;

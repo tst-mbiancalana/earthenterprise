@@ -1,5 +1,7 @@
 /*
  * Copyright 2017 Google Inc.
+ * Copyright 2020 The Open GEE Contributors 
+ * Copyright 2020 The Open GEE Contributors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,7 +78,41 @@ class GlcUnpacker {
                          int layer,
                          PackageFileLoc* data_loc);
 
+  /**
+   * Call walker function on all map data packets in all layers of the file.
+   * @param walker   A function specifier taking an int layer ID and a const
+   *                 IndexItem& parameter to process.  If walker returns true after
+   *                 handling a packet, the traversal will stop.
+   */
   void MapDataPacketWalker(const map_packet_walker& walker) const;
+
+  /**
+   * Call walker function on all map data packets in the specified layer of the file.
+   * @param layer    The layer to walk
+   * @param walker   A function specifier taking an int layer ID and a const
+   *                 IndexItem& parameter to process.  If walker returns true after
+   *                 handling a packet, the traversal will stop.
+   */
+  void MapDataPacketWalker(int layer, const map_packet_walker& walker) const;
+
+  /**
+   * Call walker function on all directory contents in all layers of the file.
+   * @param walker   A function specifier taking a const string& parameter
+   *                 to process. If walker returns false after handling a
+   *                 packet, the traversal will stop.
+   * @return whether the walker exited early
+   */
+  bool MapFileWalker(const map_file_walker& walker);
+
+  /**
+   * Call walker function on all directory contents in the specified layer of the file.
+   * @param layer    The layer to walk
+   * @param walker   A function specifier taking a const string& parameter
+   *                 to process. If walker returns false after handling a
+   *                 packet, the traversal will stop.
+   * @return whether the walker exited early
+   */
+  bool MapFileWalker(int layer, const map_file_walker& walker);
 
   /**
    * Find qtp packet and set offset and size for the packet. Qtp packets can
@@ -217,7 +253,7 @@ private:
   /**
    * Helper for reading in consecutive fields from the glc file.
    */
-  bool Read(void* data, uint64 size);
+  bool Read(void* data, std::uint64_t size);
 
   /**
    * Helper for reading creation date for glc file
@@ -228,10 +264,10 @@ private:
   /**
    * Helper for creating a crc from info data.
    */
-  uint32 InfoCrc();
+  std::uint32_t InfoCrc();
 
   // Length of full packed file.
-  uint64 length_;
+  std::uint64_t length_;
   std::string info_;
   std::string id_;
 
@@ -256,7 +292,7 @@ private:
   // Whether file contains 3d data.
   bool is_3d_;
   // Offset for consecutive reads from the reader.
-  uint64 reader_offset_;
+  std::uint64_t reader_offset_;
 };
 
 #endif  // GEO_EARTH_ENTERPRISE_SRC_FUSION_PORTABLEGLOBE_SERVERS_FILEUNPACKER_SHARED_GLC_UNPACKER_H_

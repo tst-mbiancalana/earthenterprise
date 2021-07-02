@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 #
 # Copyright 2017 Google Inc.
 #
@@ -20,15 +20,15 @@ import os
 import platform
 import socket
 
-LATEST_VERSION = '5.3.0'
+LATEST_VERSION = '5.3.9'
 
 SUPPORTED_OS_LIST = {
     'redhat': {'min_release': '6.0',
-               'max_release': '7.4'},
-    'Ubuntu': {'min_release': '10.04',
+               'max_release': '7.9'},
+    'Ubuntu': {'min_release': '16.04',
                'max_release': '16.04'},
     'CentOS': {'min_release': '6.0',
-               'max_release': '7.4'}
+               'max_release': '7.9'}
 }
 
 BAD_HOSTNAMES = ['', 'linux', 'localhost', 'dhcp', 'bootp']
@@ -61,7 +61,7 @@ def IsFusionInstalled():
 
 def IsGeeServerInstalled():
   """Check if GEE Server is installed."""
-  gee_server_start_script = '/etc/init.d/gefusion'
+  gee_server_start_script = '/etc/init.d/geserver'
   return os.path.exists(gee_server_start_script)
 
 

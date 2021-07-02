@@ -2,8 +2,10 @@
 #define _MEM_USAGE_ASSET_FUNCTION_TESTER_HPP
 
 #include <iomanip>
+#include <stdexcept>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <common/notify.h>
 #include <fusion/autoingest/Asset.h>
@@ -141,6 +143,33 @@ class AssetFunctionTester : public ThreadMemberFunctionTester
             invalid_raster_project_asset_name_suffix, asset_base_name);
     }
 
+    std::string acquire_invalid_raster_project_asset_name(
+        const std::string &asset_base_name
+    )
+    {
+        std::string res =
+            get_invalid_raster_project_asset_name(asset_base_name);
+
+        // If the asset XML doesn't exist, run the script to generate it:
+        if (!asset_name_exists(res))
+        {
+            int return_code =
+                system((
+                    get_self_dir() +
+                    "/generate_test_asset_xmls.py --skip-valid-raster-projects"
+                ).c_str());
+
+            if (return_code)
+            {
+                throw std::runtime_error(
+                    "Executing generate_test_asset_xmls.py failed with return code: " +
+                    std::to_string(return_code));
+            }
+        }
+
+        return res;
+    }
+
     std::string get_valid_raster_product_asset_name(int asset_number)
     {
         return get_numbered_asset_name(
@@ -168,11 +197,9 @@ class AssetFunctionTester : public ThreadMemberFunctionTester
         ThreadMemberFunctionTester::log_test_start_fields();
 
         log_emitter << YAML::Key << "asset cache capacity" <<
-            YAML::Value << FriendlyAsset::cache().capacity() <<
+            YAML::Value << FriendlyAsset::CacheCapacity() <<
             YAML::Key << "asset version cache capacity" <<
-            YAML::Value << FriendlyAssetVersion::cache().capacity() <<
-            YAML::Key << "DisablePacketLevelVersionCachePurge" <<
-            YAML::Value << MiscConfig::Instance().DisablePacketLevelVersionCachePurge <<
+            YAML::Value << FriendlyAssetVersion::CacheCapacity() <<
             YAML::Key << "notify level" <<
             YAML::Value << min_kh_notify_level <<
             YAML::Key << "notify level name" <<

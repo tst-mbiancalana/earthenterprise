@@ -1,4 +1,5 @@
 // Copyright 2017 Google Inc.
+// Copyright 2020 The Open GEE Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,14 +24,18 @@
 #include <stdio.h>
 #include <iostream>  // NOLINT(readability/streams)
 #include <string>
-#include "./khTypes.h"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 /**
  * Constructor.
  */
 PortableGlcReader::PortableGlcReader(const char* path)
   : path_(path) {
-  glc_file_ = fopen(path_.c_str(), "rb");
+  glc_file_ = open(path_.c_str(), O_RDONLY);
 
   auto last_sep = path_.find_last_of('/');
   if (last_sep == std::string::npos) {
@@ -60,8 +65,7 @@ PortableGlcReader::PortableGlcReader(const char* path)
   // Set file size (important for negative offsets).
   glc_file_size_ = 0;
   if (glc_file_) {
-    fseek(glc_file_, 0, SEEK_END);
-    glc_file_size_ = ftell(glc_file_);
+    glc_file_size_ = lseek64(glc_file_, 0, SEEK_END);
   } else {
     std::cerr << "GlcReader stream is not open." << std::endl;
   }
@@ -69,7 +73,7 @@ PortableGlcReader::PortableGlcReader(const char* path)
 
 PortableGlcReader::~PortableGlcReader() {
   if (glc_file_) {
-    fclose(glc_file_);
+    close(glc_file_);
   }
 }
 
@@ -84,7 +88,7 @@ bool PortableGlcReader::IsOpen() const {
  * Reads data into string buffer. Resizes the string first.
  */
 bool PortableGlcReader::Read(
-    std::string* buffer, uint64 offset, uint64 size) const {
+    std::string* buffer, std::uint64_t offset, std::uint64_t size) const {
   buffer->resize(size);
   return ReadData(&(*buffer)[0], offset, size);
 }
@@ -94,14 +98,14 @@ bool PortableGlcReader::Read(
  * Not thread safe.
  */
 bool PortableGlcReader::ReadData(
-    void* buffer, uint64 offset, uint64 size) const {
+    void* buffer, std::uint64_t offset, std::uint64_t size) const {
   if (!glc_file_) {
     return false;
   }
 
   try {
-    fseek(glc_file_, offset, SEEK_SET);
-    fread(reinterpret_cast<char*>(buffer), size, 1, glc_file_);
+    lseek64(glc_file_, offset, SEEK_SET);
+    read(glc_file_, buffer, size);
     return true;
   } catch(...) {
     return false;
@@ -112,7 +116,7 @@ bool PortableGlcReader::ReadData(
  * Returns the size of the file or 0 if there is a problem with
  * the file.
  */
-uint64 PortableGlcReader::Size() const {
+ std::uint64_t PortableGlcReader::Size() const {
   return glc_file_size_;
 }
 

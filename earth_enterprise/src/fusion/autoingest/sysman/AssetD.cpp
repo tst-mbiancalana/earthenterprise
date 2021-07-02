@@ -1,4 +1,5 @@
 // Copyright 2017 Google Inc.
+// Copyright 2020 The Open GEE Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,32 +16,10 @@
 
 #include "AssetD.h"
 #include <AssetThrowPolicy.h>
-
-// ****************************************************************************
-// ***  MutableAssetD
-// ****************************************************************************
-template <>
-MutableAssetD::DirtyMap MutableAssetD::dirtyMap = MutableAssetD::DirtyMap();
-
-
+#include <memory>
 // ****************************************************************************
 // ***  AssetImplD
 // ****************************************************************************
-
-khRefGuard<AssetImplD>
-AssetImplD::Load(const std::string &boundref)
-{
-  khRefGuard<AssetImplD> result;
-
-  // make sure the base class loader actually instantiated one of me
-  // this should always happen, but there are no compile time guarantees
-  result.dyncastassign(AssetImpl::Load(boundref));
-  if (!result) {
-    AssetThrowPolicy::FatalOrThrow(kh::tr("Internal error: AssetImplD loaded wrong type for ") + boundref);
-  }
-
-  return result;
-}
 
 void
 AssetImplD::AddVersionRef(const std::string &verref)
@@ -50,7 +29,7 @@ AssetImplD::AddVersionRef(const std::string &verref)
 }
 
 void
-AssetImplD::Modify(const std::vector<std::string>& inputs_,
+AssetImplD::Modify(const std::vector<SharedString>& inputs_,
                    const khMetaData &meta_) {
   inputs = inputs_;
   meta = meta_;
@@ -63,7 +42,7 @@ AssetImplD::InputsUpToDate(const AssetVersion &version,
   if (cachedInputs.size() != version->inputs.size())
     return false;
 
-  for (uint i = 0; i < cachedInputs.size(); ++i) {
+  for (unsigned int i = 0; i < cachedInputs.size(); ++i) {
     if (cachedInputs[i]->GetRef() != version->inputs[i])
       return false;
   }
@@ -77,9 +56,9 @@ AssetImplD::UpdateInputs(std::vector<AssetVersion> &inputvers) const
   std::size_t inputs_count = inputs.size();
 
   inputvers.reserve(inputs_count);
-  for (std::vector<std::string>::const_iterator i = inputs.begin();
-       i != inputs.end(); ++i) {
-    AssetVersionRef verref(*i);
+  for (size_t idx = 0; idx < inputs.size(); ++idx) {
+    const auto &i = inputs[idx];
+    AssetVersionRef verref(i);
     if (verref.Version() == "current") {
       // we only need to update our input if it's an asset ref
       // or a version ref with "current"
@@ -88,7 +67,7 @@ AssetImplD::UpdateInputs(std::vector<AssetVersion> &inputvers) const
       bool needed = false;
       inputvers.push_back(asset->Update(needed));
       notify(NFY_PROGRESS, "Updating asset input %lu (of %lu input%s).",
-        i - inputs.begin(), inputs_count, inputs_count == 1 ? "" : "s");
+        idx + 1, inputs_count, inputs_count == 1 ? "" : "s");
     } else {
       inputvers.push_back(AssetVersion(verref));
     }

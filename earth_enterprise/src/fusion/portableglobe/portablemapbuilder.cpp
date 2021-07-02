@@ -1,4 +1,5 @@
 // Copyright 2017 Google Inc.
+// Copyright 2020 The Open GEE Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,10 +32,12 @@
 #include "common/khEndian.h"
 #include "common/khFileUtils.h"
 #include "common/khStringUtils.h"
-#include "common/khTypes.h"
+//#include "common/khTypes.h"
+#include <cstdint>
 #include "fusion/gst/gstSimpleEarthStream.h"
 #include "fusion/gst/gstSimpleStream.h"
 #include "fusion/portableglobe/portableglobebuilder.h"
+#include "fusion/portableglobe/quadtree/qtutils.h"
 #include "fusion/portableglobe/shared/packetbundle.h"
 #include "fusion/portableglobe/shared/packetbundle_reader.h"
 #include "fusion/portableglobe/shared/packetbundle_writer.h"
@@ -45,7 +48,7 @@
 namespace fusion_portableglobe {
 
 // Names of subdirectories within the portable globe.
-const uint16 PortableMapBuilder::kMaxPacketDepth = 7;  // 4 levels / packet
+const std::uint16_t PortableMapBuilder::kMaxPacketDepth = 7;  // 4 levels / packet
 const std::string PortableMapBuilder::kMapDataDirectory = "/mapdata";
 // This limit comes from HUGE_STRING_LEN of 8192 defined in httpd.h
 const size_t      PortableMapBuilder::kBundleSizeForSizeQuery = 8000;
@@ -58,11 +61,12 @@ const size_t      PortableMapBuilder::kBundleSizeForPacketQuery = 256;
  */
 PortableMapBuilder::PortableMapBuilder(
     const std::string& source,
-    uint16 default_level,
-    uint16 max_level,
+    std::uint16_t default_level,
+    std::uint16_t max_level,
     const std::string& hires_qt_nodes_file,
     const std::string& map_directory,
     const std::string& additional_args,
+    const std::string& metadata_file,
     bool ignore_imagery_depth,
     bool no_write)
     : map_directory_(map_directory),
@@ -70,6 +74,7 @@ PortableMapBuilder::PortableMapBuilder(
     max_level_(max_level),
     source_(source),
     additional_args_(additional_args),
+    metadata_file_(metadata_file),
     ignore_imagery_depth_(ignore_imagery_depth),
     is_no_write_(no_write) {
   // Build a structure for filtering quadtree addresses.
@@ -107,10 +112,10 @@ void PortableMapBuilder::BuildMap() {
 
   // Traverse the quadtree
   std::vector<char> qt_char(24);
-  std::vector<uint32> level_row(24);
-  std::vector<uint32> level_col(24);
-  int32 level = 0;
-  int32 max_level_traversed = 0;
+  std::vector<std::uint32_t> level_row(24);
+  std::vector<std::uint32_t> level_col(24);
+  std::int32_t level = 0;
+  std::int32_t max_level_traversed = 0;
   std::string qt_string = "";
   qt_char[level] = '0';
   level_row[level] = 1;
@@ -173,6 +178,10 @@ void PortableMapBuilder::BuildMap() {
     }
   }
 
+  if (!metadata_file_.empty()) {
+    bounds_tracker_.write_json_file(metadata_file_);
+  }
+
   // Finish up writing all of the packet bundles.
   DeleteWriter();
 
@@ -188,11 +197,11 @@ void PortableMapBuilder::BuildMap() {
 // TODO: Keep track of these as we go along rather than
 // TODO: calculating each time.
 void PortableMapBuilder::GetLevelRowCol(const std::string& qtpath_str,
-                                          uint32* level,
-                                          uint32* col,
-                                          uint32* row) {
+                                          std::uint32_t* level,
+                                          std::uint32_t* col,
+                                          std::uint32_t* row) {
   *level = qtpath_str.size();
-  uint32 ndim = 1 << *level;
+  std::uint32_t ndim = 1 << *level;
   *row = 0;
   *col = 0;
   for (size_t i = 0; i < *level; ++i) {
@@ -367,9 +376,9 @@ void PortableMapBuilder::ParseServerDefs(const std::string& json) {
 
 
 bool PortableMapBuilder::WriteMapPackets(const std::string& qtpath_str,
-                                           uint32 level,
-                                           uint32 col,
-                                           uint32 row) {
+                                           std::uint32_t level,
+                                           std::uint32_t col,
+                                           std::uint32_t row) {
   #ifdef WRITE_MAP_PACKETS_OUTPUT
   // The following debug output is formatted for use in a spreadsheet.
   // It captures all calls to this function and indicates if the call
@@ -408,7 +417,7 @@ bool PortableMapBuilder::WriteMapPackets(const std::string& qtpath_str,
     #ifdef WRITE_MAP_PACKETS_OUTPUT
     std::cout << raw_packet.size() << std::endl;
     #endif
-    uint32 packet_type = layers_[i]->type_id;
+    std::uint32_t packet_type = layers_[i]->type_id;
     if (raw_packet.size() > 0) {
       if (packet_type == kImagePacket) {
         // If we are using imagery to decide if we have reached the end of
@@ -418,6 +427,10 @@ bool PortableMapBuilder::WriteMapPackets(const std::string& qtpath_str,
         // (1 x 1 clear pngs) to unnecessarily deep levels.
         found_something = true;
       }
+
+      bounds_tracker_.update(layers_[i]->channel_num,
+                             static_cast<PacketType>(packet_type),
+                             qtpath_str);
 
       std::string full_qtpath = "0" + qtpath_str;
       writer_->AppendPacket(full_qtpath, packet_type, layers_[i]->channel_num,
@@ -435,7 +448,7 @@ bool PortableMapBuilder::WriteMapPackets(const std::string& qtpath_str,
  * pruned.
  */
 bool PortableMapBuilder::KeepNode(const std::string& qtpath) const {
-  uint16 level = qtpath.size();
+  std::uint16_t level = qtpath.size();
 
   // If we are at or below the default level, keep everything.
   if (level <= default_level_) {

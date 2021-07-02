@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 import os
 import argparse
 import git
@@ -8,13 +8,17 @@ from datetime import datetime
 import re
 
 
+
+
 def GetVersion(backupFile, label=''):
     """As getLongVersion(), but only return the leading *.*.* value."""
 
     raw = GetLongVersion(backupFile, label)
-    final = raw.split("-")[0]
 
-    return final
+    # Just return the first 3 parts of the version
+    short_ver = re.findall("^\\d+\\.\\d+\\.\\d+", raw)
+
+    return short_ver[0]
 
 
 def GetLongVersion(backupFile, label=''):
@@ -81,16 +85,16 @@ def _GitVersionNameAndBuildNumber():
         if not branchName:
             # we are a detached head not on a release tag so just treat
             # the the first part of the raw describe as the release name
-            # added the b to the build number to signal this is not a releasable build
-            return _GetCommitRawDescription().split('-')[0], "b{0}-{1}".format(_GitCommitCount(), open_gee_version.get_commit_hash_from_tag('HEAD'))
+            # append '.beta' to the build number to signal this is not a tested build
+            return _GetCommitRawDescription().split('-')[0], "{0}.beta-{1}".format(_GitCommitCount(), open_gee_version.get_commit_hash_from_tag('HEAD'))
         else:
             # Get the version name from the branch name
             if _IsReleaseBranch(branchName):
                 tailTag = _GetReleaseTailTag(branchName)
                 return _GetReleaseVersionName(branchName), '{0}.{1}'.format(_GitBranchedCommitCount(tailTag), _GitCommitCount('HEAD', tailTag))
             else:
-                # added the b to the build number to signal this is not a releasable build
-                return _GetCommitRawDescription().split('-')[0],  "b{0}-{1}".format(_GitCommitCount(), _sanitizeBranchName(branchName))
+                # append '.beta' to the build number to signal this is not a tested build
+                return _GetCommitRawDescription().split('-')[0],  "{0}.beta-{1}".format(_GitCommitCount(), _sanitizeBranchName(branchName))
 
 
 def _GitBranchedCommitCount(tailTag):
@@ -123,10 +127,24 @@ def _GitPreviousReleaseTag(tailTagName):
     return ''
 
 
+def _GitTagRealCommitIdWindows(tagName):
+    """use shell command to retrieve commit id of where the tag points to (Windows version)"""
+    # for some reason .hexsha was not returning the same id....
+    commitId = os.popen("git rev-list -n 1 \"{0}\"".format(tagName.replace("\"", "\\\""))).read().strip()
+    return commitId
+
+def _GitTagRealCommitIdLinux(tagName):
+    """use shell command to retrieve commit id of where the tag points to (Linux version)"""
+    # for some reason .hexsha was not returning the same id....
+    commitId = os.popen("git rev-list -n 1 '{0}'".format(tagName.replace("'", "'\"'\"'"))).read().strip()
+    return commitId
+
 def _GitTagRealCommitId(tagName):
     """use shell command to retrieve commit id of where the tag points to"""
-    # for some reason .hexsha was not returning the same id....
-    return os.popen("git rev-list -n 1 '{0}'".format(tagName.replace("'", "'\"'\"'"))).read().strip()
+    if os.name is 'nt':
+        return _GitTagRealCommitIdWindows(tagName)
+    else:
+        return _GitTagRealCommitIdLinux(tagName)
 
 def _git_tag_list():
     """use shell command to retrieve a list of tags"""
@@ -318,7 +336,9 @@ class OpenGeeVersion(object):
         """Returns the short version string."""
 
         if not self.short_version_string:
-            self.short_version_string = self.get_long().split("-")[0]
+            # Just return the first 3 parts of the version string
+            short_ver = re.findall("^\\d+\\.\\d+\\.\\d+", self.get_long())
+            self.short_version_string = short_ver[0]
 
         return self.short_version_string
 
@@ -364,11 +384,15 @@ def main():
     parser.add_argument("-l", "--long", action="store_true", help="Output long format of version string")
     args = parser.parse_args()
 
-    print open_gee_version.get_long() if args.long else open_gee_version.get_short()
+    sys.stdout.write(open_gee_version.get_long() if args.long else open_gee_version.get_short())
+    sys.stdout.write('\n')
+    sys.stdout.flush()
 
     warning_message = open_gee_version.get_warning_message()
     if warning_message is not None:
-        print >> sys.stderr, warning_message
+        sys.stderr.write(warning_message)
+        sys.stderr.write('\n')
+        sys.stderr.flush()
 
 
 __all__ = ['open_gee_version']

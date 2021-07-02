@@ -1,4 +1,17 @@
-#include <experimental/filesystem>
+// Copyright 2021 The Open GEE Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -21,12 +34,16 @@ class FriendlyRasterProjectAssetVersionImplD : public RasterProjectAssetVersionI
 
     public:
 
-    static khRefGuard<FriendlyRasterProjectAssetVersionImplD> Load(std::string boundref)
+    static FriendlyRasterProjectAssetVersionImplD * Load(std::string boundref)
     {
-        khRefGuard<RasterProjectAssetVersionImplD> unfriendly_result =
-            RasterProjectAssetVersionImplD::Load(boundref);
-        khRefGuard<FriendlyRasterProjectAssetVersionImplD> result = 
-            *reinterpret_cast<khRefGuard<FriendlyRasterProjectAssetVersionImplD>*>(&unfriendly_result);
+        AssetSerializerLocalXML<AssetVersionImpl> serializer;
+        // We don't wrap this in a shared_ptr to avoid having two independent
+        // shared_ptrs that don't know about each other pointing at the same
+        // object. Instead, we just return the raw pointer and depend on it
+        // to not be deleted based on the way the test is written.
+        FriendlyRasterProjectAssetVersionImplD * result =
+            reinterpret_cast<FriendlyRasterProjectAssetVersionImplD*>(
+                serializer.Load(boundref).operator->());
 
         return result;
     }
@@ -53,12 +70,12 @@ class ParseRasterProjectXmlNoContent_Test :
     {
         // This names an asset with XMLs, but no content directories, such as
         // mask, mosaic, product:
-        std::string asset_name = get_invalid_raster_project_asset_name(
+        std::string asset_name = acquire_invalid_raster_project_asset_name(
             "asset-01-input-with-no-content-files");
 
         assert(asset_name_exists(asset_name));
 
-        khRefGuard<FriendlyRasterProjectAssetVersionImplD> asset_version =
+        auto asset_version =
             FriendlyRasterProjectAssetVersionImplD::Load(asset_name);
 
         // Currently, this causes a segmentation fault:
@@ -79,7 +96,7 @@ class ParseRasterProjectXmlNoContent_Test :
 
         // Currently, this causes a segmentation fault:
         // Cause the reference to be resolved by loading the XML:
-        asset_ref_character_count += asset->GetRef().length();
+        asset_ref_character_count += asset->GetRef().toString().length();
     }
 
     virtual bool run_test_operation()
@@ -89,7 +106,7 @@ class ParseRasterProjectXmlNoContent_Test :
     }
 };
 
-TEST_F(ParseRasterProjectXmlNoContent_Test, DalayedBuildChildrenWorksWithEmptyXmlFields)
+TEST_F(ParseRasterProjectXmlNoContent_Test, DelayedBuildChildrenWorksWithEmptyXmlFields)
 {
     run_delayed_build_children_test();
 

@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 #
 # Copyright 2017 Google Inc.
+# Copyright 2019, Open GEE Contributors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,7 +30,8 @@ import urllib
 import yaml
 from common import utils
 import common.configs
-
+import defusedxml.ElementTree as etree
+import xml.etree.ElementTree as etree2
 
 CONFIG_FILE = "/opt/google/gehttpd/cgi-bin/advanced_cutter.cfg"
 CONFIGS = common.configs.Configs(CONFIG_FILE)
@@ -283,7 +285,7 @@ class GlcAssembler(object):
     self.ExtractFileFromGlx(
         path, "maps/map.json", self.extract_map_json_file)
     return self.ExtractLayerInfo()
-  
+
   def GetJson(self, path):
     """Extract <map.json> from a GLM, and return it parsed."""
     subprocess.check_call([
@@ -542,6 +544,16 @@ class GlcAssembler(object):
   #   "polygon":"-- polygon --"
   #   "is_2d":true
   # }
+
+  def WritePolygonFile(self, polygon, logger):
+    with open(self.polygon_file, "w") as fp:
+      # Check XML validity and standardize representation
+      utils.PrintAndLog("Checking polygon")
+      xml = etree2.ElementTree(etree.fromstring(str(polygon)))
+      utils.PrintAndLog("Writing polygon")
+      xml.write(fp, xml_declaration=True, encoding='UTF-8')
+      utils.PrintAndLog("SUCCESS", logger, None)
+
   def AssembleGlc(self, form_):
     """Assemble a 2d or 3d glc based on given parameters."""
     utils.PrintAndLog("Assembling ...")
@@ -601,8 +613,8 @@ class GlcAssembler(object):
       utils.PrintAndLog("SUCCESS", logger, None)
 
       utils.PrintAndLog("Create polygon file: %s" % self.polygon_file, logger)
-      utils.CreateFile(self.polygon_file, spec["polygon"])
-      utils.PrintAndLog("SUCCESS", logger, None)
+
+      self.WritePolygonFile(spec["polygon"], logger)
 
       if spec["is_2d"]:
         utils.PrintAndLog("Building 2d glc at %s ..." % path, logger)
@@ -730,7 +742,7 @@ class GlcAssembler(object):
     self.output_dir = base_path
     self.glc_path = glc_path
     self.info_file = INFO_FILE_LOG % self.base_path
-   
+
     logger = self.GetLogger()
     utils.PrintAndLog("Prepare disassembler...", logger)
     utils.PrintAndLog("Output dir: %s" % self.base_path, logger)
@@ -743,7 +755,7 @@ class GlcAssembler(object):
     """Extract glms or glbs from a glc."""
 
     logger = None
-   
+
     try:
       output_dir = form_.getvalue_path("dir")
       glc_path = form_.getvalue_path("path")

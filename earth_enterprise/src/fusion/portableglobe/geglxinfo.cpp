@@ -1,4 +1,5 @@
 // Copyright 2017 Google Inc.
+// Copyright 2020 The Open GEE Contributors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +24,8 @@
 #include <map>
 #include <sstream>  // NOLINT(readability/streams)
 #include <string>
+#include <iomanip>
+#include <cstdint>
 #include "common/etencoder.h"
 #include "common/khAbortedException.h"
 #include "common/khFileUtils.h"
@@ -30,7 +33,7 @@
 #include "common/khEndian.h"
 #include "common/khGetopt.h"
 #include "common/khSimpleException.h"
-#include "common/khTypes.h"
+#include <cstdint>
 #include "common/proto_streaming_imagery.h"
 #include "common/packet.h"
 #include "common/packetcompress.h"
@@ -46,11 +49,11 @@ namespace {
 // and level. The btree is a 48-bit representation of up to a
 // 24-level address. It is filled from the high bits down. The
 // number of meaningful bits is level*2.
-void GetXY(int level, uint64 btree, uint64* x, uint64* y) {
+void GetXY(int level, std::uint64_t btree, std::uint64_t* x, std::uint64_t* y) {
   int shift = 48 - level * 2;
   *x = 0;
   *y = 0;
-  uint64 half_node = 1;
+  std::uint64_t half_node = 1;
   for (int i = 0; i < level; ++i) {
     // Check next quadnode value (0 - 3).
     int next_node = (btree >> shift) & 3;
@@ -80,9 +83,9 @@ void writePacketToFile(const IndexItem& index_item,
                        const std::string& extraSuffix) {
   char path[256];
   const char* suffix;
-  uint64 x;
-  uint64 y;
-  uint64 btree = index_item.btree_high;
+  std::uint64_t x;
+  std::uint64_t y;
+  std::uint64_t btree = index_item.btree_high;
   btree <<= 16;
   btree |= (index_item.btree_low & 0xffff);
   GetXY(index_item.level, btree, &x, &y);
@@ -150,10 +153,237 @@ bool getPackageFileLocs(GlcUnpacker* const unpacker,
   return true;
 }
 
+void printTerrainPacket(LittleEndianReadBuffer& buffer, std::ostringstream& s) {
+
+  geterrain::Mesh m;
+
+  int skip = 0;
+  int count = 0;
+  while ((buffer.CurrPos() < buffer.size()) || skip > 0) {
+    count++;
+
+    if (count != 1) {
+      s << std::endl << std::endl;
+    }
+
+    s << "mesh " << count << " of 20:" << std::endl;
+
+    if (skip > 0) {
+      skip--;
+      s << "Skipped because of previous empty mesh header." << std::endl;
+    } else {
+      m.Pull(buffer);
+      if (m.source_size() > 0) {
+        m.PrintMesh(s);
+      } else {
+        skip = 3;
+        s << "EMPTY MESH HEADER -- Skipping next "
+          << skip << " mesh entries." << std::endl;
+      }
+    }
+  }
+
+  s << std::endl;
+}
+
+void printVectorPacketBitFlags(const ushort bitFlags, std::ostringstream& s) {
+  s << "      bitFlags: 0x" << std::hex << bitFlags << std::dec << " (";
+  
+  if ((bitFlags & 0x01) == 0x01) {
+    s << "Relative";
+  } else if ((bitFlags & 0x02) == 0x02) {
+    s << "Absolute";
+  } else {
+    s << "Clamp to ground";
+  }
+  if ((bitFlags & 0x04) == 0x04) {
+    s << ", Extrude";
+  }
+  s << ")" << std::endl;
+}
+
+void printVectorPacket(const LittleEndianReadBuffer& buffer, std::ostringstream& s) {
+
+  const std::map<std::uint32_t, std::string> vTypeNames = {
+    {TYPE_STREETPACKET, "TYPE_STREETPACKET"},
+    {TYPE_SITEPACKET, "TYPE_SITEPACKET"},
+    {TYPE_DRAWABLEPACKET, "TYPE_DRAWABLEPACKET"},
+    {TYPE_POLYLINEPACKET, "TYPE_POLYLINEPACKET"},
+    {TYPE_AREAPACKET, "TYPE_AREAPACKET"},
+    {TYPE_STREETPACKET_UTF8, "TYPE_STREETPACKET_UTF8"},
+    {TYPE_SITEPACKET_UTF8, "TYPE_SITEPACKET_UTF8"},
+    {TYPE_LANDMARK, "TYPE_LANDMARK"},
+    {TYPE_POLYGONPACKET, "TYPE_POLYGONPACKET"}
+  };
+
+  etDrawablePacket drawablePacket;
+  drawablePacket.load((char*)buffer.data(), (int)buffer.size());
+
+  const char *pPacketDataBuffer = buffer.data() + drawablePacket.packetHeader.dataBufferOffset;
+
+  const int floatPrecision = 12;
+
+  const auto typeNameIter = vTypeNames.find(drawablePacket.packetHeader.dataTypeID);
+  std::string vectorDataType = "UNKNOWN";
+  if (typeNameIter != vTypeNames.end()) {
+    vectorDataType = typeNameIter->second;
+  }
+
+  s << "etDrawablePacket.packetHeader fields:" << std::endl;
+  s << "  dataBufferOffset = " << drawablePacket.packetHeader.dataBufferOffset << std::endl;
+  s << "  dataBufferSize = " << drawablePacket.packetHeader.dataBufferSize << std::endl;
+  s << "  dataInstanceSize = " << drawablePacket.packetHeader.dataInstanceSize << std::endl;
+  s << "  dataTypeID = " << drawablePacket.packetHeader.dataTypeID << " -- " << vectorDataType << std::endl;
+  s << "  magicID = " << drawablePacket.packetHeader.magicID 
+    << " (0x" << std::hex << drawablePacket.packetHeader.magicID << std::dec << ")" << std::endl;
+  s << "  metaBufferSize = " << drawablePacket.packetHeader.metaBufferSize << std::endl;
+  s << "  numInstances = " << drawablePacket.packetHeader.numInstances << std::endl;
+  s << "  version = " << drawablePacket.packetHeader.version << std::endl;
+  s << std::endl;
+
+  for(std::uint32_t idx = 0; idx < drawablePacket.packetHeader.numInstances; idx++){
+    const etDataPacket *pChildPacket = drawablePacket.getPtr(idx);
+    const char *pChildPacketDataBuffer = pPacketDataBuffer +
+                                pChildPacket->packetHeader.dataBufferOffset +
+                                pChildPacket->dataBuffer_OFFSET;
+
+    s << "ChildDataPacket " << idx << ":" << std::endl;
+    s << "  packetHeader.numInstances = " << pChildPacket->packetHeader.numInstances << std::endl;
+
+    for(std::uint32_t instance_idx = 0; instance_idx < pChildPacket->packetHeader.numInstances; instance_idx++){
+
+      s << "    Instance " << instance_idx << ":" << std::endl;
+
+      const auto typeNameIter = vTypeNames.find(pChildPacket->packetHeader.dataTypeID);
+      std::string vectorDataType = "unknown";
+      if (typeNameIter != vTypeNames.end()) {
+        vectorDataType = typeNameIter->second;
+      }
+
+      s << "      packetHeader.dataTypeID: " << vectorDataType << std::endl;
+
+      const char* pVectorPacketDataLocation = pPacketDataBuffer 
+            + pChildPacket->packetHeader.dataBufferOffset 
+            + pChildPacket->dataInstances_OFFSET 
+            + pChildPacket->packetHeader.dataInstanceSize*instance_idx;
+
+      if (pChildPacket->packetHeader.dataTypeID == TYPE_STREETPACKET_UTF8) {
+        const etStreetPacketData *pVectorPacketData =
+          reinterpret_cast<const etStreetPacketData*>(pVectorPacketDataLocation);
+
+        const char *name_str = 
+          pChildPacketDataBuffer + pVectorPacketData->name_OFFSET + sizeof(etPattern);
+
+        s << "      name_str: " << name_str << std::endl;
+        s << "      style: " << pVectorPacketData->style << std::endl;
+        s << "      numPt: " << pVectorPacketData->numPt << std::endl;
+        printVectorPacketBitFlags(pVectorPacketData->bitFlags, s);
+
+        const etVec3d* pPoints = reinterpret_cast<const etVec3d*>
+          (pChildPacketDataBuffer + pVectorPacketData->localPt_OFFSET);
+
+        s << "      points: (longitude * 180, latitude * 180, altitude (raw))" << std::endl;
+        s << std::setprecision(floatPrecision);
+
+        for (int a = 0; a < pVectorPacketData->numPt; a++, pPoints++) {
+          s << "        " << pPoints->elem[0] * 180.0
+            << ", " << pPoints->elem[1] * 180.0
+            << ", " << pPoints->elem[2] 
+            << std::endl;
+        }
+      } else if (pChildPacket->packetHeader.dataTypeID == TYPE_POLYLINEPACKET) {
+        const etPolyLinePacketData *pVectorPacketData =
+          reinterpret_cast<const etPolyLinePacketData*>(pVectorPacketDataLocation);
+
+        const char *name_str = 
+          pChildPacketDataBuffer + pVectorPacketData->name_OFFSET + sizeof(etPattern);
+
+        s << "      name_str: " << name_str << std::endl;
+        s << "      style: " << pVectorPacketData->style << std::endl;
+        s << "      numPt: " << pVectorPacketData->numPt << std::endl;
+        printVectorPacketBitFlags(pVectorPacketData->bitFlags, s);
+
+        const etVec3d* pPoints = reinterpret_cast<const etVec3d*>
+          (pChildPacketDataBuffer + pVectorPacketData->localPt_OFFSET);
+
+        s << "      points: (longitude * 180, latitude * 180, altitude (raw))" << std::endl;
+        s << std::setprecision(floatPrecision);
+
+        for (int a = 0; a < pVectorPacketData->numPt; a++, pPoints++) {
+          s << "        " << pPoints->elem[0] * 180.0
+            << ", " << pPoints->elem[1] * 180.0
+            << ", " << pPoints->elem[2] 
+            << std::endl;
+        }
+      } else if (pChildPacket->packetHeader.dataTypeID == TYPE_POLYGONPACKET){
+        const etPolygonPacketData *pVectorPacketData =
+          reinterpret_cast<const etPolygonPacketData*>(pVectorPacketDataLocation);
+
+        const char *name_str = 
+          pChildPacketDataBuffer + pVectorPacketData->name_OFFSET + sizeof(etPattern);
+
+        s << "      name_str: " << name_str << std::endl;
+        s << "      style: " << pVectorPacketData->style << std::endl;
+        s << "      numPt: " << pVectorPacketData->numPt << std::endl;
+        s << "      numEdgeFlags: " << pVectorPacketData->numEdgeFlags << std::endl;
+        printVectorPacketBitFlags(pVectorPacketData->bitFlags, s);
+
+        const etVec3d* pPoints = reinterpret_cast<const etVec3d*>
+          (pChildPacketDataBuffer + pVectorPacketData->localPt_OFFSET);
+        const bool* pEdgeFlags = reinterpret_cast<const bool*>
+          (pChildPacketDataBuffer + pVectorPacketData->edgeFlags_OFFSET);
+
+        s << "      points: (longitude * 180, latitude * 180, altitude (raw), edgeFlag)" << std::endl;
+        s << std::setprecision(floatPrecision);
+
+        if (pVectorPacketData->numPt == pVectorPacketData->numEdgeFlags) {
+          for (int a = 0; a < pVectorPacketData->numPt; a++, pPoints++, pEdgeFlags++) {
+            s << "        " << pPoints->elem[0] * 180.0
+              << ", " << pPoints->elem[1] * 180.0
+              << ", " << pPoints->elem[2]
+              << ", " << ((*pEdgeFlags) ? "true" : "false") 
+              << std::endl;
+          }
+        } else {
+          s << "NOT ENUMERATING BECAUSE NUMBER OF POINTS != NUMBER OF EDGE FLAGS" << std::endl;
+        }
+      } else if (pChildPacket->packetHeader.dataTypeID == TYPE_LANDMARK) {
+        const etLandmarkPacketData *pVectorPacketData =
+          reinterpret_cast<const etLandmarkPacketData*>(pVectorPacketDataLocation);
+
+        const char *name_str =
+          pChildPacketDataBuffer + pVectorPacketData->name_OFFSET + sizeof(etPattern);
+        const char *desc_str =
+          pChildPacketDataBuffer + pVectorPacketData->description_OFFSET;
+
+        s << "      name_str: " << name_str << std::endl;
+        s << "      desc_str: " << desc_str << std::endl;
+        s << "      style: " << pVectorPacketData->style << std::endl;
+        s << "      numPt: " << pVectorPacketData->numPt << std::endl;
+        printVectorPacketBitFlags(pVectorPacketData->bitFlags, s);
+
+        const etVec3d *vecPoint = 
+          reinterpret_cast<const etVec3d*>(
+            pChildPacketDataBuffer + pVectorPacketData->localPt_OFFSET);
+
+        s << "      point:" << std::endl;
+        s << std::setprecision(floatPrecision);
+        s << "        longitude * 180: " << vecPoint->elem[0] * 180.0 << std::endl;
+        s << "        latitude * 180: " << vecPoint->elem[1] * 180.0 << std::endl;
+        s << "        altitude (raw): " << vecPoint->elem[2] << std::endl;
+      } else {
+        s << "      NEED TO HANDLE THIS TYPE" << std::endl;
+      }
+
+      s << std::endl;
+    }
+  }
+}
+
 void extractAllPackets(GlcUnpacker* const unpacker,
                     PortableGlcReader* const reader,
-                    uint64 start_idx,
-                    uint64 end_idx,
+                    std::uint64_t start_idx,
+                    std::uint64_t end_idx,
                     int layer_idx,
                     bool is_composite,
                     const std::string& index_file,
@@ -172,7 +402,7 @@ void extractAllPackets(GlcUnpacker* const unpacker,
     return;
   }
 
-  uint64 number_of_packets = index_file_loc.Size() / sizeof(IndexItem);
+  std::uint64_t number_of_packets = index_file_loc.Size() / sizeof(IndexItem);
   std::cout << "Extracting " << (end_idx - start_idx)
             << " of " << number_of_packets
             << " packets" << std::endl;
@@ -183,19 +413,19 @@ void extractAllPackets(GlcUnpacker* const unpacker,
     end_idx = number_of_packets;
   }
 
-  uint64 offset = index_file_loc.Offset() + sizeof(IndexItem) * start_idx;
+  std::uint64_t offset = index_file_loc.Offset() + sizeof(IndexItem) * start_idx;
   std::string buffer;
-  uint64 max_size = 200000;
+  std::uint64_t max_size = 200000;
   buffer.resize(max_size);
   // Main extraction loop.
   // Reads sequential index entries and saves packets as files
   // to disk. Directories are arranged in z, x, y order and the
   // name of the file corresponds to the channel.
-  for (uint64 i = start_idx; i < end_idx; ++i) {
+  for (std::uint64_t i = start_idx; i < end_idx; ++i) {
     IndexItem index_item;
     // std::cout << "index offset: " << offset << std::endl;
     if (reader->ReadData(&index_item, offset, sizeof(IndexItem))) {
-      uint64 data_offset = data_file_loc.Offset() + index_item.offset;
+      std::uint64_t data_offset = data_file_loc.Offset() + index_item.offset;
       buffer.resize(MIN(max_size, index_item.packet_size));
       if (index_item.packet_size >= max_size) {
         std::cout << "Data item is too big: " << i
@@ -235,10 +465,8 @@ void extractAllPackets(GlcUnpacker* const unpacker,
           LittleEndianReadBuffer decompressed;
           etEncoder::DecodeWithDefaultKey(&buffer[0], buffer.size());
           if (KhPktDecompress(buffer.data(), buffer.size(), &decompressed)) {
-            geterrain::Mesh m;
-            m.Pull(decompressed);
             std::ostringstream s;
-            m.PrintMesh(s);
+            printTerrainPacket(decompressed, s);
             writePacketToFile(index_item, s.str(), false, "globetiles", "_terrain");
           }
         }
@@ -249,25 +477,10 @@ void extractAllPackets(GlcUnpacker* const unpacker,
           LittleEndianReadBuffer decompressed;
           etEncoder::DecodeWithDefaultKey(&buffer[0], buffer.size());
           if (KhPktDecompress(buffer.data(), buffer.size(), &decompressed) &&
-             (decompressed.size() >= sizeof(uint32)*2)) {
-            const uint32* vectorData = reinterpret_cast<const uint32*>(decompressed.data());
-            std::map<uint32, std::string> vTypeNames = {
-              {TYPE_STREETPACKET, "street"},
-              {TYPE_SITEPACKET, "site"},
-              {TYPE_DRAWABLEPACKET, "drawable"},
-              {TYPE_POLYLINEPACKET, "polyline"},
-              {TYPE_AREAPACKET, "area"},
-              {TYPE_STREETPACKET_UTF8, "streetutf"},
-              {TYPE_SITEPACKET_UTF8, "siteutf"},
-              {TYPE_LANDMARK, "landmark"},
-              {TYPE_POLYGONPACKET, "polygon"}
-            };
-            auto typeNameIter = vTypeNames.find(vectorData[1]);
-            std::string vectorDataType = "unknown";
-            if (typeNameIter != vTypeNames.end()) {
-              vectorDataType = typeNameIter->second;
-            }
-            writePacketToFile(index_item, decompressed, false, "globetiles", "_vector_"+vectorDataType);
+             (decompressed.size() >= sizeof(std::uint32_t)*2)) {
+            std::ostringstream s;
+            printVectorPacket(decompressed, s);
+            writePacketToFile(index_item, s.str(), false, "globetiles", "_vector");
           }
         }
         else {
@@ -296,8 +509,8 @@ void ExtractPackets(GlcUnpacker* const unpacker,
                     const std::string& suffix,
                     bool is_composite,
                     int layer_idx,
-                    uint64 start_idx,
-                    uint64 end_idx) {
+                    std::uint64_t start_idx,
+                    std::uint64_t end_idx) {
   if (unpacker->Is3d()) {
     std::cout << "Extracting packets for a globe file" << std::endl;
     extractAllPackets(unpacker, reader, start_idx, end_idx, layer_idx, is_composite, "data/index", "data/pbundle_0000");
@@ -406,8 +619,8 @@ void ListFiles(GlcUnpacker* const unpacker) {
 // writes to out_file.
 void ExtractFile(const std::string& out_file,
                  const std::string& glx_file,
-                 uint64 offset,
-                 uint64 size) {
+                 std::uint64_t offset,
+                 std::uint64_t size) {
   if (out_file.empty()) {
     notify(NFY_WARN, "No file specified for output.");
     return;
@@ -418,7 +631,7 @@ void ExtractFile(const std::string& out_file,
 
   // Copy data from package to file.
   fp_in.seekg(offset, std::ios::beg);
-  for (uint64 i = 0; i < size; ++i) {
+  for (std::uint64_t i = 0; i < size; ++i) {
     fp_out.put(fp_in.get());
   }
 
@@ -585,8 +798,8 @@ int main(int argc, char **argv) {
 
     // Check crc.
     if (check_crc) {
-      uint32 read_crc = Package::ReadCrc(reader);
-      uint32 calculated_crc = Package::CalculateCrc(reader);
+      std::uint32_t read_crc = Package::ReadCrc(reader);
+      std::uint32_t calculated_crc = Package::CalculateCrc(reader);
       std::cout.flags(std::ios::right | std::ios::hex | std::ios::showbase);
       std::cout << "\nFile crc: " << read_crc<< std::endl;
       std::cout << "Calculated crc :" << calculated_crc << std::endl;
@@ -619,13 +832,13 @@ int main(int argc, char **argv) {
     if (extract_packets) {
       int layer_idx = 1000;
       if (!layer_idx_str.empty()) {
-        sscanf(layer_idx_str.c_str(), "%u", &layer_idx);
+        sscanf(layer_idx_str.c_str(), "%d", &layer_idx);
       }
-      uint64 start_idx = 0;
+      std::uint64_t start_idx = 0;
       if (!start_idx_str.empty()) {
         sscanf(start_idx_str.c_str(), "%lu", &start_idx);
       }
-      uint64 end_idx = 0x3fffffffffffffff;
+      std::uint64_t end_idx = 0x3fffffffffffffff;
       if (!end_idx_str.empty()) {
         sscanf(end_idx_str.c_str(), "%lu", &end_idx);
       }
@@ -662,7 +875,7 @@ int main(int argc, char **argv) {
       }
 
       if (!packet_channel.empty()) {
-        sscanf(packet_channel.c_str(), "%u", &channel);
+        sscanf(packet_channel.c_str(), "%d", &channel);
       }
 
       // Find the packet.

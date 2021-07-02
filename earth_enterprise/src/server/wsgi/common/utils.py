@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python2.7
 #
 # Copyright 2017 Google Inc.
 #
@@ -23,7 +23,8 @@ import logging
 import re
 import socket
 import urllib2
-import xml.sax.saxutils as saxutils
+from xml.sax.saxutils import escape
+from geAbstractionFetcher import GetHostName
 
 GEHTTPD_CONF_PATH = "/opt/google/gehttpd/conf/gehttpd.conf"
 POSTGRES_PROPERTIES_PATH = (
@@ -112,7 +113,7 @@ def GetSchemeHostPort(environ):
 
 def GetServerHost():
   """Gets fully quailified domain name."""
-  return socket.getfqdn()
+  return GetHostName(True)
 
 
 def GetApacheServerUrl():
@@ -274,6 +275,43 @@ def GetPostgresPortNumber():
   return None
 
 
+def GetPostgresHost():
+  """Get postgres host for remote connections
+
+  Returns:
+    Host name of remote database to connect to or None.
+  """
+  pattern = r"^\s*host\s*=\s*(\d{4,})\s*"
+
+  match = MatchPattern(POSTGRES_PROPERTIES_PATH, pattern)
+  if match:
+    host = match[0]
+    return host
+
+  return None
+
+
+def GetPostgresPassword():
+  """Get geuser role password for remote connections
+
+  Returns:
+    Password for remote geuser role or None.
+  """
+  pattern = r"^\s*pass\s*=\s*(\d{4,})\s*"
+  match = MatchPattern(POSTGRES_PROPERTIES_PATH, pattern)
+  if match:
+    password = match[0]
+    return password
+
+  pattern = r"^\s*password\s*=\s*(\d{4,})\s*"
+  match = MatchPattern(POSTGRES_PROPERTIES_PATH, pattern)
+  if match:
+    password = match[0]
+    return password
+
+  return None
+
+
 def HtmlEscape(text):
   """Escapes a string for HTML.
 
@@ -282,7 +320,7 @@ def HtmlEscape(text):
   Returns:
     HTML escaped string.
   """
-  return saxutils.escape(text, _HTML_ESCAPE_TABLE)
+  return escape(text, _HTML_ESCAPE_TABLE)
 
 
 def JoinQueryStrings(a, b):
